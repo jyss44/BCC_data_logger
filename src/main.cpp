@@ -22,7 +22,6 @@
 #include <SPI.h>
 #include <CircularBuffer.h>             // https://github.com/rlogiacco/CircularBuffer
 #include <movingAvg.h>                  // https://github.com/JChristensen/movingAvg
-//#include <MCP9800.h>                    // https://github.com/JChristensen/MCP9800
 
 #include "main.h"
 #include "setup.h"
