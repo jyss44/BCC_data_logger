@@ -27,7 +27,7 @@
 #include "setup.h"
 #include "transmission.h"
 
-static uint8_t mydata[12] = "abcdefg";
+uint8_t mydata[12] = "abcdefg";
 enum sendStates sendState;
 
 // Pin mapping
@@ -169,6 +169,9 @@ void setup() {
   do_send(&sendjob);
 }
 
+/**
+ * Main loop
+ */
 void loop() {
   os_runloop_once();
 }
