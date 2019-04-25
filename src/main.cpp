@@ -26,8 +26,9 @@
 #include "main.h"
 #include "setup.h"
 #include "transmission.h"
+#include "messages.h"
 
-uint8_t mydata[12] = "abcdefg";
+uint8_t mydata[MESSAGE_SIZE] = "abcdefg";
 enum sendStates sendState;
 
 // Pin mapping
@@ -45,6 +46,7 @@ void do_send(osjob_t* j){
   } else {
       // Prepare upstream data transmission at the next possible time.
       LMIC_setTxData2(1, mydata, sizeof(mydata)-1, 0);
+      PrintMessage(mydata);
       Serial.println("Packet queued");
       Serial.println(LMIC.freq);
   }
