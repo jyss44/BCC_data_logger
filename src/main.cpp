@@ -28,8 +28,14 @@
 #include "transmission.h"
 #include "messages.h"
 
-uint8_t mydata[MESSAGE_SIZE] = "abcdefg";
+uint8_t mydata[MESSAGE_SIZE];
+message myMessage;
 enum sendStates sendState;
+
+// data
+CircularBuffer<uint8_t, NO_SAMPLES> LoadV;
+CircularBuffer<uint8_t, NO_SAMPLES> LoadI;
+CircularBuffer<uint8_t, NO_SAMPLES> LeakI;
 
 // Pin mapping
 const lmic_pinmap lmic_pins = {

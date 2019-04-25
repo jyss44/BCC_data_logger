@@ -9,7 +9,7 @@ void PrintMessage(uint8_t message[MESSAGE_SIZE]){
   Serial.print(" } \n");
 }
 
-void setMessageParams(message* message, messageType type, bool mainsOn, bool contactOn, bool loadOn) {
+void setMessage(message* message, messageType type, bool mainsOn, bool contactOn, bool loadOn) {
   message->type = type;
   message->mainsOn = mainsOn;
   message->contactOn = contactOn;
@@ -46,9 +46,19 @@ void InsertData(message* message, uint8_t loadV[3], uint8_t loadI[3], uint8_t le
   }
 }
 
-uint8_t CreateMessageBytes(message* message, int sequence) {
+uint8_t* CreateMessageBytes(message* message, int sequenceNo) {
   uint8_t messageBytes[12];
 
+  // Load headers and
   messageBytes[0] = message->header;
+  messageBytes[1] = highByte(sequenceNo);
+  messageBytes[2] = lowByte(sequenceNo);
 
+  for(int i = 0; i < 3; i ++) {
+    messageBytes[3 + i] = message->loadV[i];
+    messageBytes[6 + i] = message->loadI[i];
+    messageBytes[9 + i] = message->leakI[i];
+  }
+
+  return messageBytes;
 }
