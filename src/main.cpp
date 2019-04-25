@@ -28,14 +28,16 @@
 #include "transmission.h"
 #include "messages.h"
 
-uint8_t mydata[MESSAGE_SIZE];
-message myMessage;
-enum sendStates sendState;
-
 // data
 CircularBuffer<uint8_t, NO_SAMPLES> LoadV;
 CircularBuffer<uint8_t, NO_SAMPLES> LoadI;
 CircularBuffer<uint8_t, NO_SAMPLES> LeakI;
+
+// Messages
+uint8_t myData[MESSAGE_SIZE];
+message myMessage;
+int sequenceNo = 0;
+enum sendStates sendState;
 
 // Pin mapping
 const lmic_pinmap lmic_pins = {
@@ -50,11 +52,16 @@ void do_send(osjob_t* j){
   if (LMIC.opmode & OP_TXRXPEND) {
       Serial.println("OP_TXRXPEND, not sending");
   } else {
-      // Prepare upstream data transmission at the next possible time.
-      LMIC_setTxData2(1, mydata, sizeof(mydata)-1, 0);
-      PrintMessage(mydata);
-      Serial.println("Packet queued");
-      Serial.println(LMIC.freq);
+    // Format data
+    setMessage(&myMessage, STATUS, digitalRead(MAINS), digitalRead(CONTACT), true);
+    //myData = CreateMessageBytes(&myMessage, sequenceNo);
+
+    // Prepare upstream data transmission at the next possible time.
+    LMIC_setTxData2(1, myData, sizeof(myData)-1, 0);
+    PrintMessage(myData);
+    Serial.println("Packet queued");
+    Serial.println(LMIC.freq);
+    sequenceNo++;
   }
   // Next TX is scheduled after TX_COMPLETE event.
 }
@@ -64,63 +71,63 @@ void onEvent (ev_t ev) {
   Serial.print(": ");
   Serial.println(ev);
   switch(ev) {
-      case EV_SCAN_TIMEOUT:
-          Serial.println("EV_SCAN_TIMEOUT");
-          break;
-      case EV_BEACON_FOUND:
-          Serial.println("EV_BEACON_FOUND");
-          break;
-      case EV_BEACON_MISSED:
-          Serial.println("EV_BEACON_MISSED");
-          break;
-      case EV_BEACON_TRACKED:
-          Serial.println("EV_BEACON_TRACKED");
-          break;
-      case EV_JOINING:
-          Serial.println("EV_JOINING");
-          break;
-      case EV_JOINED:
-          Serial.println("EV_JOINED");
-          break;
-      case EV_RFU1:
-          Serial.println("EV_RFU1");
-          break;
-      case EV_JOIN_FAILED:
-          Serial.println("EV_JOIN_FAILED");
-          break;
-      case EV_REJOIN_FAILED:
-          Serial.println("EV_REJOIN_FAILED");
-          break;
-      case EV_TXCOMPLETE:
-          Serial.println("EV_TXCOMPLETE (includes waiting for RX windows)");
-          if(LMIC.dataLen) {
-              // data received in rx slot after tx
-              Serial.print("Data Received: ");
-              Serial.write(LMIC.frame+LMIC.dataBeg, LMIC.dataLen);
-              Serial.println();
-          }
-          // Schedule next transmission
-          os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(TX_INTERVAL), do_send);
-          break;
-      case EV_LOST_TSYNC:
-          Serial.println("EV_LOST_TSYNC");
-          break;
-      case EV_RESET:
-          Serial.println("EV_RESET");
-          break;
-      case EV_RXCOMPLETE:
-          // data received in ping slot
-          Serial.println("EV_RXCOMPLETE");
-          break;
-      case EV_LINK_DEAD:
-          Serial.println("EV_LINK_DEAD");
-          break;
-      case EV_LINK_ALIVE:
-          Serial.println("EV_LINK_ALIVE");
-          break;
-       default:
-          Serial.println("Unknown event");
-          break;
+    case EV_SCAN_TIMEOUT:
+        Serial.println("EV_SCAN_TIMEOUT");
+        break;
+    case EV_BEACON_FOUND:
+        Serial.println("EV_BEACON_FOUND");
+        break;
+    case EV_BEACON_MISSED:
+        Serial.println("EV_BEACON_MISSED");
+        break;
+    case EV_BEACON_TRACKED:
+        Serial.println("EV_BEACON_TRACKED");
+        break;
+    case EV_JOINING:
+        Serial.println("EV_JOINING");
+        break;
+    case EV_JOINED:
+        Serial.println("EV_JOINED");
+        break;
+    case EV_RFU1:
+        Serial.println("EV_RFU1");
+        break;
+    case EV_JOIN_FAILED:
+        Serial.println("EV_JOIN_FAILED");
+        break;
+    case EV_REJOIN_FAILED:
+        Serial.println("EV_REJOIN_FAILED");
+        break;
+    case EV_TXCOMPLETE:
+        Serial.println("EV_TXCOMPLETE (includes waiting for RX windows)");
+        if(LMIC.dataLen) {
+            // data received in rx slot after tx
+            Serial.print("Data Received: ");
+            Serial.write(LMIC.frame+LMIC.dataBeg, LMIC.dataLen);
+            Serial.println();
+        }
+        // Schedule next transmission
+        os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(TX_INTERVAL), do_send);
+        break;
+    case EV_LOST_TSYNC:
+        Serial.println("EV_LOST_TSYNC");
+        break;
+    case EV_RESET:
+        Serial.println("EV_RESET");
+        break;
+    case EV_RXCOMPLETE:
+        // data received in ping slot
+        Serial.println("EV_RXCOMPLETE");
+        break;
+    case EV_LINK_DEAD:
+        Serial.println("EV_LINK_DEAD");
+        break;
+    case EV_LINK_ALIVE:
+        Serial.println("EV_LINK_ALIVE");
+        break;
+     default:
+        Serial.println("Unknown event");
+        break;
   }
 }
 
@@ -187,7 +194,10 @@ void loop() {
 // Timer 3 Interrupt
 ISR(TIMER3_COMPB_vect){//timer1 interrupt 1Hz toggles pin 13 (LED)
   if (sendState == SEND_STATUS) {
-    // gather data
+    // Read Load V & I, and leakage I from analog pins.
+    LoadV.push(analogRead(A2));
+    LoadI.push(analogRead(A1));
+    LeakI.push(analogRead(A0));
 
     // Switch machine state, if failure conditions met
     if ((!digitalRead(MAINS) && !digitalRead(CONTACT))){

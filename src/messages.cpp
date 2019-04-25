@@ -14,6 +14,8 @@ void setMessage(message* message, messageType type, bool mainsOn, bool contactOn
   message->mainsOn = mainsOn;
   message->contactOn = contactOn;
   message->loadOn = loadOn;
+
+  MakeHeader(message);
 }
 
 /**
