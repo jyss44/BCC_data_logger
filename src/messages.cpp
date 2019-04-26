@@ -9,8 +9,9 @@ void PrintMessage(uint8_t message[MESSAGE_SIZE]){
   Serial.print(" } \n");
 }
 
-void setMessage(message* message, messageType type, bool mainsOn, bool contactOn, bool loadOn) {
+void setMessage(message* message, messageType type, bool ok, bool mainsOn, bool contactOn, bool loadOn) {
   message->type = type;
+  message->ok = ok;
   message->mainsOn = mainsOn;
   message->contactOn = contactOn;
   message->loadOn = loadOn;
@@ -29,13 +30,14 @@ void setMessage(message* message, messageType type, bool mainsOn, bool contactOn
  * @param message message struct to set header byte
  */
 void MakeHeader(message* message) {
-  // header structure:
-
   uint8_t header = 0;
 
-  bool ok = message->mainsOn || (message->mainsOn && message->contactOn && message->loadOn);
-
   // Set the bits
+  header ^= (-(message->ok) ^ header) & (1UL << 7);
+  header ^= (-(message->type == CHUNK_END) ^ header) & (1UL << 6);
+  header ^= (-message->mainsOn ^ header) & (1UL << 5);
+  header ^= (-message->contactOn ^ header) & (1UL << 4);
+  header ^= (-message->loadOn ^ header) & (1UL << 3);
 
   message->header = header;
 }
@@ -48,19 +50,17 @@ void InsertData(message* message, uint8_t loadV[3], uint8_t loadI[3], uint8_t le
   }
 }
 
-uint8_t* CreateMessageBytes(message* message, int sequenceNo) {
+void CreateMessageBytes(message* message, int sequenceNo) {
   uint8_t messageBytes[12];
 
   // Load headers and
-  messageBytes[0] = message->header;
-  messageBytes[1] = highByte(sequenceNo);
-  messageBytes[2] = lowByte(sequenceNo);
+  message->messageBytes[0] = message->header;
+  message->messageBytes[1] = highByte(sequenceNo);
+  message->messageBytes[2] = lowByte(sequenceNo);
 
   for(int i = 0; i < 3; i ++) {
-    messageBytes[3 + i] = message->loadV[i];
-    messageBytes[6 + i] = message->loadI[i];
-    messageBytes[9 + i] = message->leakI[i];
+    message->messageBytes[3 + i] = message->loadV[i];
+    message->messageBytes[6 + i] = message->loadI[i];
+    message->messageBytes[9 + i] = message->leakI[i];
   }
-
-  return messageBytes;
 }

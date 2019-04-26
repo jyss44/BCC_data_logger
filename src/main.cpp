@@ -28,13 +28,15 @@
 #include "transmission.h"
 #include "messages.h"
 
+using namespace std;
+
 // data
 CircularBuffer<uint8_t, NO_SAMPLES> LoadV;
 CircularBuffer<uint8_t, NO_SAMPLES> LoadI;
 CircularBuffer<uint8_t, NO_SAMPLES> LeakI;
 
 // Messages
-uint8_t myData[MESSAGE_SIZE];
+uint8_t* myData = (uint8_t*) malloc(MESSAGE_SIZE * sizeof(uint8_t));
 message myMessage;
 int sequenceNo = 0;
 enum sendStates sendState;
@@ -53,12 +55,13 @@ void do_send(osjob_t* j){
       Serial.println("OP_TXRXPEND, not sending");
   } else {
     // Format data
-    setMessage(&myMessage, STATUS, digitalRead(MAINS), digitalRead(CONTACT), true);
-    //myData = CreateMessageBytes(&myMessage, sequenceNo);
+    setMessage(&myMessage, CHUNK, sendState == SEND_STATUS, digitalRead(MAINS), digitalRead(CONTACT), true);
+    CreateMessageBytes(&myMessage, sequenceNo);
+    uint8_t* ass = myMessage.messageBytes;
 
     // Prepare upstream data transmission at the next possible time.
     LMIC_setTxData2(1, myData, sizeof(myData)-1, 0);
-    PrintMessage(myData);
+    PrintMessage(ass);
     Serial.println("Packet queued");
     Serial.println(LMIC.freq);
     sequenceNo++;
