@@ -55,14 +55,17 @@ void do_send(osjob_t* j){
       Serial.println("OP_TXRXPEND, not sending");
   } else {
     // Format data
-    setMessage(&myMessage, CHUNK, sendState == SEND_STATUS, digitalRead(MAINS), digitalRead(CONTACT), true);
+    bool status = sendState == SEND_STATUS;
+
+    setMessage(&myMessage, CHUNK, status, digitalRead(MAINS), digitalRead(CONTACT), true);
+
     CreateMessageBytes(&myMessage, sequenceNo);
     uint8_t* ass = myMessage.messageBytes;
 
     // Prepare upstream data transmission at the next possible time.
     LMIC_setTxData2(1, myData, sizeof(myData)-1, 0);
     PrintMessage(ass);
-    Serial.println("Packet queued");
+    Serial.println("Packet sent");
     Serial.println(LMIC.freq);
     sequenceNo++;
   }
@@ -103,6 +106,7 @@ void onEvent (ev_t ev) {
         break;
     case EV_TXCOMPLETE:
         Serial.println("EV_TXCOMPLETE (includes waiting for RX windows)");
+        Serial.println();
         if(LMIC.dataLen) {
             // data received in rx slot after tx
             Serial.print("Data Received: ");
@@ -110,7 +114,15 @@ void onEvent (ev_t ev) {
             Serial.println();
         }
         // Schedule next transmission
-        os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(TX_INTERVAL), do_send);
+
+        if (sendState == SEND_STATUS) {
+          os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(INTERVAL_STATUS), do_send);
+          Serial.println("Status packet queued");
+        } else if (sendState == SEND_DATA) {
+          os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(INTERVAL_DATA), do_send);
+          Serial.println("Data packet queued");
+        }
+
         break;
     case EV_LOST_TSYNC:
         Serial.println("EV_LOST_TSYNC");
@@ -137,7 +149,7 @@ void onEvent (ev_t ev) {
 void setup() {
   Serial.begin(9600);
   while(!Serial);
-  Serial.println("Starting");
+  Serial.println("Starting...");
 
   // Setup constants
   sendState = SEND_STATUS;
@@ -203,10 +215,18 @@ ISR(TIMER3_COMPB_vect){//timer1 interrupt 1Hz toggles pin 13 (LED)
     LeakI.push(analogRead(A0));
 
     // Switch machine state, if failure conditions met
-    if ((!digitalRead(MAINS) && !digitalRead(CONTACT))){
+    if (sendState == SEND_STATUS && (!digitalRead(MAINS) && !digitalRead(CONTACT))){
       // Set LED_OK to on
       digitalWrite(LED_OK, LOW);
       digitalWrite(LED_FAIL, HIGH);
+
+      // Clear queue & schedule message immediately
+      os_clearCallback(&sendjob);
+      os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(INTERVAL_DATA), do_send);
+
+      // Print to Serial
+      Serial.println("Failure detected.");
+      Serial.println();
       sendState = SEND_DATA;
     }
   }
