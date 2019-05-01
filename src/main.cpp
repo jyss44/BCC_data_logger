@@ -40,6 +40,7 @@ uint8_t* myData = (uint8_t*) malloc(MESSAGE_SIZE * sizeof(uint8_t));
 message myMessage;
 int sequenceNo = 0;
 enum sendStates sendState;
+bool full = false;
 
 // Pin mapping
 const lmic_pinmap lmic_pins = {
@@ -50,6 +51,9 @@ const lmic_pinmap lmic_pins = {
 };
 
 void do_send(osjob_t* j){
+  Serial.print(os_getTime());
+  Serial.print(": ");
+  Serial.println("Sending data...");
   // Check if there is not a current TX/RX job running
   if (LMIC.opmode & OP_TXRXPEND) {
       Serial.println("OP_TXRXPEND, not sending");
@@ -68,6 +72,7 @@ void do_send(osjob_t* j){
     Serial.println("Packet sent");
     Serial.println(LMIC.freq);
     sequenceNo++;
+    Serial.println();
   }
   // Next TX is scheduled after TX_COMPLETE event.
 }
@@ -106,7 +111,6 @@ void onEvent (ev_t ev) {
         break;
     case EV_TXCOMPLETE:
         Serial.println("EV_TXCOMPLETE (includes waiting for RX windows)");
-        Serial.println();
         if(LMIC.dataLen) {
             // data received in rx slot after tx
             Serial.print("Data Received: ");
@@ -214,6 +218,13 @@ ISR(TIMER3_COMPB_vect){//timer1 interrupt 1Hz toggles pin 13 (LED)
     LoadI.push(analogRead(A1));
     LeakI.push(analogRead(A0));
 
+    if(!full && LoadV.isEmpty() && LoadI.isEmpty() && LeakI.isEmpty()) {
+      Serial.print(os_getTime());
+      Serial.print(": ");
+      Serial.println("Buffer is now full.");
+      full = true;
+    }
+
     // Switch machine state, if failure conditions met
     if (sendState == SEND_STATUS && (!digitalRead(MAINS) && !digitalRead(CONTACT))){
       // Set LED_OK to on
@@ -225,8 +236,9 @@ ISR(TIMER3_COMPB_vect){//timer1 interrupt 1Hz toggles pin 13 (LED)
       os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(INTERVAL_DATA), do_send);
 
       // Print to Serial
-      Serial.println("Failure detected.");
-      Serial.println();
+      Serial.print(os_getTime());
+      Serial.print(": ");
+      Serial.println("Failure detected. Starting data stream...");
       sendState = SEND_DATA;
     }
   }
