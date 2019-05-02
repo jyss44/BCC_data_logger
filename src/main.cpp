@@ -34,6 +34,7 @@ using namespace std;
 CircularBuffer<uint8_t, NO_SAMPLES> LoadV;
 CircularBuffer<uint8_t, NO_SAMPLES> LoadI;
 CircularBuffer<uint8_t, NO_SAMPLES> LeakI;
+movingAvg avgLoadV(5);
 
 // Messages
 uint8_t* myData = (uint8_t*) malloc(MESSAGE_SIZE * sizeof(uint8_t));
@@ -41,6 +42,7 @@ message myMessage;
 int sequenceNo = 0;
 enum sendStates sendState;
 bool full = false;
+bool empty = false;
 
 // Pin mapping
 const lmic_pinmap lmic_pins = {
@@ -58,11 +60,18 @@ void do_send(osjob_t* j){
   if (LMIC.opmode & OP_TXRXPEND) {
       Serial.println("OP_TXRXPEND, not sending");
   } else {
-    // Format data
-    bool status = sendState == SEND_STATUS;
+    messageType type = CHUNK;
 
-    setMessage(&myMessage, CHUNK, status, digitalRead(MAINS), digitalRead(CONTACT), true);
+    // Get message information
+    bool status = sendState == SEND_STATUS; // Status of device
+    empty = (LoadV.size() - 1 <= 1) && (LoadI.size() - 1) <= (1 && LeakI.size() - 1 <= 1);
 
+    if (empty) {
+      type = CHUNK_END;
+    }
+
+    // Create message
+    setMessage(&myMessage, CHUNK_END, status, digitalRead(MAINS), digitalRead(CONTACT), true);
     CreateMessageBytes(&myMessage, sequenceNo);
     uint8_t* ass = myMessage.messageBytes;
 
@@ -161,6 +170,7 @@ void setup() {
   // Setup arduino hardware
   SetupPins();
   SetupInterrerupt();
+  avgLoadV.begin(); // Start moving average
 
   #ifdef VCC_ENABLE
   // For Pinoccio Scout boards
@@ -212,11 +222,14 @@ void loop() {
 
 // Timer 3 Interrupt
 ISR(TIMER3_COMPB_vect){//timer1 interrupt 1Hz toggles pin 13 (LED)
+  Serial.println("Tick");
   if (sendState == SEND_STATUS) {
     // Read Load V & I, and leakage I from analog pins.
     LoadV.push(analogRead(A2));
     LoadI.push(analogRead(A1));
     LeakI.push(analogRead(A0));
+
+    avgLoadV.reading(abs(analogRead(A2)));
 
     if(!full && LoadV.isEmpty() && LoadI.isEmpty() && LeakI.isEmpty()) {
       Serial.print(os_getTime());
@@ -224,9 +237,11 @@ ISR(TIMER3_COMPB_vect){//timer1 interrupt 1Hz toggles pin 13 (LED)
       Serial.println("Buffer is now full.");
       full = true;
     }
-
+    Serial.println(avgLoadV.getAvg());
     // Switch machine state, if failure conditions met
-    if (sendState == SEND_STATUS && (!digitalRead(MAINS) && !digitalRead(CONTACT))){
+    bool ok = (digitalRead(MAINS) && !digitalRead(CONTACT) && avgLoadV.getAvg() < THRESH)  || (digitalRead(MAINS) && digitalRead(CONTACT) && avgLoadV.getAvg() > THRESH);
+
+    if (sendState == SEND_STATUS && !ok ){
       // Set LED_OK to on
       digitalWrite(LED_OK, LOW);
       digitalWrite(LED_FAIL, HIGH);
