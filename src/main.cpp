@@ -17,16 +17,32 @@
 *    * LoRa Mini etc.
 *******************************************************************************/
 #include "Arduino.h"
-#include <lmic.h>
+#include <lmic.h>                       // https://github.com/matthijskooijman/arduino-lmic
 #include <hal/hal.h>
 #include <SPI.h>
+#include <CircularBuffer.h>             // https://github.com/rlogiacco/CircularBuffer
+#include <movingAvg.h>                  // https://github.com/JChristensen/movingAvg
 
 #include "main.h"
 #include "setup.h"
 #include "transmission.h"
+#include "messages.h"
 
-static uint8_t mydata[12] = "abcdefg";
+using namespace std;
+
+// data
+CircularBuffer<uint8_t, NO_SAMPLES> LoadV;
+CircularBuffer<uint8_t, NO_SAMPLES> LoadI;
+CircularBuffer<uint8_t, NO_SAMPLES> LeakI;
+movingAvg avgLoadV(5);
+
+// Messages
+uint8_t* myData = (uint8_t*) malloc(MESSAGE_SIZE * sizeof(uint8_t));
+message myMessage;
+int sequenceNo = 0;
 enum sendStates sendState;
+bool full = false;
+bool empty = false;
 
 // Pin mapping
 const lmic_pinmap lmic_pins = {
@@ -37,14 +53,35 @@ const lmic_pinmap lmic_pins = {
 };
 
 void do_send(osjob_t* j){
+  Serial.print(os_getTime());
+  Serial.print(": ");
+  Serial.println("Sending data...");
   // Check if there is not a current TX/RX job running
   if (LMIC.opmode & OP_TXRXPEND) {
       Serial.println("OP_TXRXPEND, not sending");
   } else {
-      // Prepare upstream data transmission at the next possible time.
-      LMIC_setTxData2(1, mydata, sizeof(mydata)-1, 0);
-      Serial.println("Packet queued");
-      Serial.println(LMIC.freq);
+    messageType type = CHUNK;
+
+    // Get message information
+    bool status = sendState == SEND_STATUS; // Status of device
+    empty = (LoadV.size() - 1 <= 1) && (LoadI.size() - 1) <= (1 && LeakI.size() - 1 <= 1);
+
+    if (empty) {
+      type = CHUNK_END;
+    }
+
+    // Create message
+    setMessage(&myMessage, CHUNK_END, status, digitalRead(MAINS), digitalRead(CONTACT), true);
+    CreateMessageBytes(&myMessage, sequenceNo);
+    uint8_t* ass = myMessage.messageBytes;
+
+    // Prepare upstream data transmission at the next possible time.
+    LMIC_setTxData2(1, myData, sizeof(myData)-1, 0);
+    PrintMessage(ass);
+    Serial.println("Packet sent");
+    Serial.println(LMIC.freq);
+    sequenceNo++;
+    Serial.println();
   }
   // Next TX is scheduled after TX_COMPLETE event.
 }
@@ -54,70 +91,78 @@ void onEvent (ev_t ev) {
   Serial.print(": ");
   Serial.println(ev);
   switch(ev) {
-      case EV_SCAN_TIMEOUT:
-          Serial.println("EV_SCAN_TIMEOUT");
-          break;
-      case EV_BEACON_FOUND:
-          Serial.println("EV_BEACON_FOUND");
-          break;
-      case EV_BEACON_MISSED:
-          Serial.println("EV_BEACON_MISSED");
-          break;
-      case EV_BEACON_TRACKED:
-          Serial.println("EV_BEACON_TRACKED");
-          break;
-      case EV_JOINING:
-          Serial.println("EV_JOINING");
-          break;
-      case EV_JOINED:
-          Serial.println("EV_JOINED");
-          break;
-      case EV_RFU1:
-          Serial.println("EV_RFU1");
-          break;
-      case EV_JOIN_FAILED:
-          Serial.println("EV_JOIN_FAILED");
-          break;
-      case EV_REJOIN_FAILED:
-          Serial.println("EV_REJOIN_FAILED");
-          break;
-      case EV_TXCOMPLETE:
-          Serial.println("EV_TXCOMPLETE (includes waiting for RX windows)");
-          if(LMIC.dataLen) {
-              // data received in rx slot after tx
-              Serial.print("Data Received: ");
-              Serial.write(LMIC.frame+LMIC.dataBeg, LMIC.dataLen);
-              Serial.println();
-          }
-          // Schedule next transmission
-          os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(TX_INTERVAL), do_send);
-          break;
-      case EV_LOST_TSYNC:
-          Serial.println("EV_LOST_TSYNC");
-          break;
-      case EV_RESET:
-          Serial.println("EV_RESET");
-          break;
-      case EV_RXCOMPLETE:
-          // data received in ping slot
-          Serial.println("EV_RXCOMPLETE");
-          break;
-      case EV_LINK_DEAD:
-          Serial.println("EV_LINK_DEAD");
-          break;
-      case EV_LINK_ALIVE:
-          Serial.println("EV_LINK_ALIVE");
-          break;
-       default:
-          Serial.println("Unknown event");
-          break;
+    case EV_SCAN_TIMEOUT:
+        Serial.println("EV_SCAN_TIMEOUT");
+        break;
+    case EV_BEACON_FOUND:
+        Serial.println("EV_BEACON_FOUND");
+        break;
+    case EV_BEACON_MISSED:
+        Serial.println("EV_BEACON_MISSED");
+        break;
+    case EV_BEACON_TRACKED:
+        Serial.println("EV_BEACON_TRACKED");
+        break;
+    case EV_JOINING:
+        Serial.println("EV_JOINING");
+        break;
+    case EV_JOINED:
+        Serial.println("EV_JOINED");
+        break;
+    case EV_RFU1:
+        Serial.println("EV_RFU1");
+        break;
+    case EV_JOIN_FAILED:
+        Serial.println("EV_JOIN_FAILED");
+        break;
+    case EV_REJOIN_FAILED:
+        Serial.println("EV_REJOIN_FAILED");
+        break;
+    case EV_TXCOMPLETE:
+        Serial.println("EV_TXCOMPLETE (includes waiting for RX windows)");
+        if(LMIC.dataLen) {
+            // data received in rx slot after tx
+            Serial.print("Data Received: ");
+            Serial.write(LMIC.frame+LMIC.dataBeg, LMIC.dataLen);
+            Serial.println();
+        }
+        // Schedule next transmission
+
+        if (sendState == SEND_STATUS) {
+          os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(INTERVAL_STATUS), do_send);
+          Serial.println("Status packet queued");
+        } else if (sendState == SEND_DATA) {
+          os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(INTERVAL_DATA), do_send);
+          Serial.println("Data packet queued");
+        }
+
+        break;
+    case EV_LOST_TSYNC:
+        Serial.println("EV_LOST_TSYNC");
+        break;
+    case EV_RESET:
+        Serial.println("EV_RESET");
+        break;
+    case EV_RXCOMPLETE:
+        // data received in ping slot
+        Serial.println("EV_RXCOMPLETE");
+        break;
+    case EV_LINK_DEAD:
+        Serial.println("EV_LINK_DEAD");
+        break;
+    case EV_LINK_ALIVE:
+        Serial.println("EV_LINK_ALIVE");
+        break;
+     default:
+        Serial.println("Unknown event");
+        break;
   }
 }
 
 void setup() {
   Serial.begin(9600);
   while(!Serial);
-  Serial.println("Starting");
+  Serial.println("Starting...");
 
   // Setup constants
   sendState = SEND_STATUS;
@@ -125,6 +170,7 @@ void setup() {
   // Setup arduino hardware
   SetupPins();
   SetupInterrerupt();
+  avgLoadV.begin(); // Start moving average
 
   #ifdef VCC_ENABLE
   // For Pinoccio Scout boards
@@ -167,20 +213,47 @@ void setup() {
   do_send(&sendjob);
 }
 
+/**
+ * Main loop
+ */
 void loop() {
   os_runloop_once();
 }
 
 // Timer 3 Interrupt
 ISR(TIMER3_COMPB_vect){//timer1 interrupt 1Hz toggles pin 13 (LED)
+  Serial.println("Tick");
   if (sendState == SEND_STATUS) {
-    // gather data
+    // Read Load V & I, and leakage I from analog pins.
+    LoadV.push(analogRead(A2));
+    LoadI.push(analogRead(A1));
+    LeakI.push(analogRead(A0));
 
+    avgLoadV.reading(abs(analogRead(A2)));
+
+    if(!full && LoadV.isEmpty() && LoadI.isEmpty() && LeakI.isEmpty()) {
+      Serial.print(os_getTime());
+      Serial.print(": ");
+      Serial.println("Buffer is now full.");
+      full = true;
+    }
+    Serial.println(avgLoadV.getAvg());
     // Switch machine state, if failure conditions met
-    if ((!digitalRead(MAINS) && !digitalRead(CONTACT))){
+    bool ok = (digitalRead(MAINS) && !digitalRead(CONTACT) && avgLoadV.getAvg() < THRESH)  || (digitalRead(MAINS) && digitalRead(CONTACT) && avgLoadV.getAvg() > THRESH);
+
+    if (sendState == SEND_STATUS && !ok ){
       // Set LED_OK to on
       digitalWrite(LED_OK, LOW);
       digitalWrite(LED_FAIL, HIGH);
+
+      // Clear queue & schedule message immediately
+      os_clearCallback(&sendjob);
+      os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(INTERVAL_DATA), do_send);
+
+      // Print to Serial
+      Serial.print(os_getTime());
+      Serial.print(": ");
+      Serial.println("Failure detected. Starting data stream...");
       sendState = SEND_DATA;
     }
   }
