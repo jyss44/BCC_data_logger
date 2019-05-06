@@ -35,7 +35,7 @@ using namespace std;
 CircularBuffer<uint8_t, NO_SAMPLES> LoadV;
 CircularBuffer<uint8_t, NO_SAMPLES> LoadI;
 CircularBuffer<uint8_t, NO_SAMPLES> LeakI;
-movingAvg avgLoadV(5);
+movingAvg avgLoadV(FS);
 
 // Messages
 uint8_t* myData = (uint8_t*) malloc(MESSAGE_SIZE * sizeof(uint8_t));
@@ -67,12 +67,30 @@ void do_send(osjob_t* j){
     bool status = sendState == SEND_STATUS; // Status of device
     empty = (LoadV.size() - 1 <= 1) && (LoadI.size() - 1) <= (1 && LeakI.size() - 1 <= 1);
 
-    if (empty) {
-      type = CHUNK_END;
+    // Insert data
+    if (sendState == SEND_DATA) {
+      // Ensure that data is not empty
+      for (int i = 0; i < 3; i++){
+        if (!LoadV.isEmpty() && !LoadI.isEmpty() && !LeakI.isEmpty()) {
+            myMessage.loadV[i] = LoadV.pop();
+            myMessage.loadI[i] = LoadI.pop();
+            myMessage.leakI[i] = LoadI.pop();
+        } else {
+          Serial.println("Data buffer emptied");
+          myMessage.loadV[i] = 0;
+          myMessage.loadI[i] = 0;
+          myMessage.leakI[i] = 0;
+
+          sendState == SEND_STATUS;
+          type = CHUNK_END;
+        }
+      }
     }
 
-    // Create message
-    setMessage(&myMessage, CHUNK_END, status, digitalRead(MAINS), digitalRead(CONTACT), true);
+    // Create message header
+    setMessage(&myMessage, type, status, digitalRead(MAINS), digitalRead(CONTACT), avgLoadV.getAvg() < THRESH);
+
+
     CreateMessageBytes(&myMessage, sequenceNo);
     uint8_t* ass = myMessage.messageBytes;
 
@@ -170,10 +188,6 @@ void setup() {
 
   // Setup arduino hardware
   SetupPins();
-  Timer3.initialize(PERIOD_LONG);
-  Timer3.attachInterrupt(timerInterrupt, PERIOD_LONG);
-
-  avgLoadV.begin(); // Start moving average
 
   #ifdef VCC_ENABLE
   // For Pinoccio Scout boards
@@ -212,6 +226,11 @@ void setup() {
   // Set data rate and transmit power (note: txpow seems to be ignored by the library)
   LMIC_setDrTxpow(DR_SF7,14);
 
+  Timer3.initialize(PERIOD);
+  Timer3.attachInterrupt(timerInterrupt);
+
+  avgLoadV.begin(); // Start moving average
+
   // Start job
   do_send(&sendjob);
 }
@@ -220,14 +239,14 @@ void setup() {
  * Main loop
  */
 void loop() {
+  checkState();
   os_runloop_once();
 }
 
 // Timer 3 Interrupt
 void timerInterrupt() {//timer1 interrupt 1Hz toggles pin 13 (LED)
-  Serial.println("Tick");
+  //Serial.println("Tick");
   readValues();
-  checkState();
 }
 
 
@@ -247,14 +266,14 @@ void readValues() {
       full = true;
     }
 
-    Serial.println(avgLoadV.getAvg());
+    //Serial.println(avgLoadV.getAvg());
   }
 }
 
 void checkState() {
   if (sendState == SEND_STATUS) {
     // Switch machine state, if failure conditions met
-    bool ok = true;
+    bool ok = (digitalRead(MAINS) && !digitalRead(CONTACT) && avgLoadV.getAvg() < THRESH) || (digitalRead(MAINS) && digitalRead(CONTACT) && avgLoadV.getAvg() > THRESH);// && avgLoadV.getAvg() < THRESH);
 
     if (sendState == SEND_STATUS && !ok ){
       // Set LED_OK to on
