@@ -22,6 +22,7 @@
 #include <SPI.h>
 #include <CircularBuffer.h>             // https://github.com/rlogiacco/CircularBuffer
 #include <movingAvg.h>                  // https://github.com/JChristensen/movingAvg
+#include <TimerThree.h>
 
 #include "main.h"
 #include "setup.h"
@@ -169,7 +170,9 @@ void setup() {
 
   // Setup arduino hardware
   SetupPins();
-  SetupInterrerupt();
+  Timer3.initialize(PERIOD_LONG);
+  Timer3.attachInterrupt(timerInterrupt, PERIOD_LONG);
+
   avgLoadV.begin(); // Start moving average
 
   #ifdef VCC_ENABLE
@@ -221,25 +224,37 @@ void loop() {
 }
 
 // Timer 3 Interrupt
-ISR(TIMER3_COMPB_vect){//timer1 interrupt 1Hz toggles pin 13 (LED)
+void timerInterrupt() {//timer1 interrupt 1Hz toggles pin 13 (LED)
   Serial.println("Tick");
+  readValues();
+  checkState();
+}
+
+
+void readValues() {
   if (sendState == SEND_STATUS) {
     // Read Load V & I, and leakage I from analog pins.
     LoadV.push(analogRead(A2));
     LoadI.push(analogRead(A1));
     LeakI.push(analogRead(A0));
 
-    avgLoadV.reading(abs(analogRead(A2)));
+    avgLoadV.reading(abs(analogRead(A2) - 400));
 
-    if(!full && LoadV.isEmpty() && LoadI.isEmpty() && LeakI.isEmpty()) {
+    if(!full && LoadV.isFull() && LoadI.isFull() && LeakI.isFull()) {
       Serial.print(os_getTime());
       Serial.print(": ");
       Serial.println("Buffer is now full.");
       full = true;
     }
+
     Serial.println(avgLoadV.getAvg());
+  }
+}
+
+void checkState() {
+  if (sendState == SEND_STATUS) {
     // Switch machine state, if failure conditions met
-    bool ok = (digitalRead(MAINS) && !digitalRead(CONTACT) && avgLoadV.getAvg() < THRESH)  || (digitalRead(MAINS) && digitalRead(CONTACT) && avgLoadV.getAvg() > THRESH);
+    bool ok = true;
 
     if (sendState == SEND_STATUS && !ok ){
       // Set LED_OK to on
