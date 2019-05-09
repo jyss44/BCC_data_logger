@@ -226,6 +226,12 @@ void setup() {
   // Set data rate and transmit power (note: txpow seems to be ignored by the library)
   LMIC_setDrTxpow(DR_SF7,14);
 
+  for (uint8_t i = 0; i < 9; i++) {
+    if (i != CHANNEL) {
+      LMIC_disableChannel(i);
+    }
+  }
+
   Timer3.initialize(PERIOD);
   Timer3.attachInterrupt(timerInterrupt);
 
@@ -257,7 +263,7 @@ void readValues() {
     LoadI.push(analogRead(A1));
     LeakI.push(analogRead(A0));
 
-    avgLoadV.reading(abs(analogRead(A2) - 400));
+    avgLoadV.reading(abs(analogRead(A2) - BIAS));
 
     if(!full && LoadV.isFull() && LoadI.isFull() && LeakI.isFull()) {
       Serial.print(os_getTime());
@@ -275,7 +281,7 @@ void checkState() {
     // Switch machine state, if failure conditions met
     bool ok = (digitalRead(MAINS) && !digitalRead(CONTACT) && avgLoadV.getAvg() < THRESH) || (digitalRead(MAINS) && digitalRead(CONTACT) && avgLoadV.getAvg() > THRESH);// && avgLoadV.getAvg() < THRESH);
 
-    if (sendState == SEND_STATUS && !ok ){
+    if (!ok){
       // Set LED_OK to on
       digitalWrite(LED_OK, LOW);
       digitalWrite(LED_FAIL, HIGH);

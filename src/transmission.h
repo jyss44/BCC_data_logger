@@ -23,5 +23,5 @@ static osjob_t initjob,sendjob,blinkjob;
 
 // Schedule TX every this many seconds (might become longer due to duty
 // cycle limitations).
-const unsigned INTERVAL_STATUS = 60;
+const unsigned INTERVAL_STATUS = 30;
 const unsigned INTERVAL_DATA = 10;
