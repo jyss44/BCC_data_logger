@@ -217,6 +217,16 @@ void setup() {
   LMIC_setSession (0x1, DEVADDR, NWKSKEY, APPSKEY);
   #endif
 
+  // First, disable channels 0-7
+  for (int channel=0; channel<8; ++channel) {
+    LMIC_disableChannel(channel);
+  }
+  // Now, disable channels 16-72 (is there 72 ??)
+  for (int channel=16; channel<72; ++channel) {
+    LMIC_disableChannel(channel);
+  }
+  // This means only channels 8-15 are up
+
   // Disable link check validation
   LMIC_setLinkCheckMode(0);
 
@@ -225,12 +235,6 @@ void setup() {
 
   // Set data rate and transmit power (note: txpow seems to be ignored by the library)
   LMIC_setDrTxpow(DR_SF7,14);
-
-  for (uint8_t i = 0; i < 9; i++) {
-    if (i != CHANNEL) {
-      LMIC_disableChannel(i);
-    }
-  }
 
   Timer3.initialize(PERIOD);
   Timer3.attachInterrupt(timerInterrupt);
