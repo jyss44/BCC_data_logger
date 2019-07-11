@@ -36,10 +36,13 @@ CircularBuffer<uint8_t, NO_SAMPLES> LoadV;
 CircularBuffer<uint8_t, NO_SAMPLES> LoadI;
 CircularBuffer<uint8_t, NO_SAMPLES> LeakI;
 movingAvg avgLoadV(FS);
+movingAvg avgLeakI(100);
+movingAvg avgLoadI(100);
 
 // Messages
 uint8_t* myData = (uint8_t*) malloc(MESSAGE_SIZE * sizeof(uint8_t));
 message myMessage;
+static uint8_t mydatabutt[] = "abcdefg";
 int sequenceNo = 0;
 enum sendStates sendState;
 bool full = false;
@@ -85,6 +88,17 @@ void do_send(osjob_t* j){
           type = CHUNK_END;
         }
       }
+    } else {
+      myMessage.loadV[0] = uint8_t (avgLoadV.getAvg());
+      myMessage.loadI[0] = uint8_t(avgLoadI.getAvg());
+      myMessage.leakI[0] = uint8_t(avgLeakI.getAvg());
+
+      Serial.print("Average load voltage (V): ");
+      Serial.println(myMessage.loadV[0] * (34.821/1024));
+      Serial.print("Average load current (A): ");
+      Serial.println(myMessage.loadI[0] * (10.0/1024));
+      Serial.print("Average leakage current (mA): ");
+      Serial.println(myMessage.leakI[0] * (0.125/1024));
     }
 
     // Create message header
@@ -92,11 +106,12 @@ void do_send(osjob_t* j){
 
 
     CreateMessageBytes(&myMessage, sequenceNo);
-    uint8_t* ass = myMessage.messageBytes;
+    uint8_t* displayMsg = myMessage.messageBytes;
 
     // Prepare upstream data transmission at the next possible time.
     LMIC_setTxData2(1, myData, sizeof(myData)-1, 0);
-    PrintMessage(ass);
+    //LMIC_setTxData2(1, mydatabutt, sizeof(mydatabutt)-1, 0);
+    PrintMessage(displayMsg);
     Serial.println("Packet sent");
     Serial.println(LMIC.freq);
     sequenceNo++;
@@ -222,7 +237,7 @@ void setup() {
     LMIC_disableChannel(channel);
   }
   // Now, disable channels 16-72 (is there 72 ??)
-  for (int channel=16; channel<72; ++channel) {
+  for (int channel=9; channel<72; ++channel) {
     LMIC_disableChannel(channel);
   }
   // This means only channels 8-15 are up
@@ -240,6 +255,8 @@ void setup() {
   Timer3.attachInterrupt(timerInterrupt);
 
   avgLoadV.begin(); // Start moving average
+  avgLeakI.begin();
+  avgLoadI.begin();
 
   // Start job
   do_send(&sendjob);
@@ -249,6 +266,8 @@ void setup() {
  * Main loop
  */
 void loop() {
+  avgLoadI.reading(abs(analogRead(A1) - BIAS));
+  avgLeakI.reading(abs(analogRead(A0) - BIAS));
   checkState();
   os_runloop_once();
 }
@@ -269,6 +288,8 @@ void readValues() {
 
     avgLoadV.reading(abs(analogRead(A2) - BIAS));
 
+    //Serial.println((avgLoadV.getAvg()));
+
     if(!full && LoadV.isFull() && LoadI.isFull() && LeakI.isFull()) {
       Serial.print(os_getTime());
       Serial.print(": ");
@@ -276,7 +297,6 @@ void readValues() {
       full = true;
     }
 
-    //Serial.println(avgLoadV.getAvg());
   }
 }
 
@@ -284,7 +304,7 @@ void checkState() {
   if (sendState == SEND_STATUS) {
     // Switch machine state, if failure conditions met
     bool ok = (digitalRead(MAINS) && !digitalRead(CONTACT) && avgLoadV.getAvg() < THRESH) || (digitalRead(MAINS) && digitalRead(CONTACT) && avgLoadV.getAvg() > THRESH);// && avgLoadV.getAvg() < THRESH);
-
+                                                                                                                                                                                                                                          Zx s
     if (!ok){
       // Set LED_OK to on
       digitalWrite(LED_OK, LOW);
